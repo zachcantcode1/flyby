@@ -1,0 +1,32 @@
+services:
+  flyby:
+    build:
+      context: .
+      args:
+        - VITE_OPENSKY_CLIENT_ID=${VITE_OPENSKY_CLIENT_ID}
+        - VITE_OPENSKY_CLIENT_SECRET=${VITE_OPENSKY_CLIENT_SECRET}
+        - VITE_FR24_API_KEY=${VITE_FR24_API_KEY}
+        - VITE_NTFY_URL=http://ntfy:80
+        - VITE_NTFY_TOPIC=${VITE_NTFY_TOPIC:-flyby-alerts}
+        - VITE_HOME_LAT=${VITE_HOME_LAT}
+        - VITE_HOME_LON=${VITE_HOME_LON}
+        - VITE_NOTIFICATION_RADIUS_KM=${VITE_NOTIFICATION_RADIUS_KM:-10}
+    ports:
+      - "3000:80"
+    depends_on:
+      - ntfy
+    restart: unless-stopped
+
+  ntfy:
+    image: binwiederhier/ntfy
+    command: serve --cache-file /var/cache/ntfy/cache.db
+    ports:
+      - "8080:80"
+    volumes:
+      - ntfy-cache:/var/cache/ntfy
+    environment:
+      - TZ=America/Chicago
+    restart: unless-stopped
+
+volumes:
+  ntfy-cache:
