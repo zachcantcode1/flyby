@@ -33,13 +33,21 @@ export async function sendNtfyNotification(
     }
 
     try {
+        // Remove emojis from title (HTTP headers must be ISO-8859-1)
+        const safeTitle = title.replace(/[^\x00-\x7F]/g, '').trim();
+
         const headers: Record<string, string> = {
-            'Title': title,
+            'Title': safeTitle || 'Flight Alert',
             'Priority': String(options.priority || 3),
         };
 
-        if (options.tags?.length) {
-            headers['Tags'] = options.tags.join(',');
+        // Add airplane tag for emoji display in notification
+        const tags = options.tags || [];
+        if (!tags.includes('airplane')) {
+            tags.unshift('airplane');
+        }
+        if (tags.length) {
+            headers['Tags'] = tags.join(',');
         }
 
         if (options.click) {
