@@ -19,7 +19,8 @@ services:
 
   ntfy:
     image: binwiederhier/ntfy
-    command: serve --cache-file /var/cache/ntfy/cache.db
+    command: >
+      serve --cache-file /var/cache/ntfy/cache.db --upstream-base-url https://ntfy.sh
     ports:
       - "8080:80"
     volumes:
@@ -30,3 +31,5 @@ services:
 
 volumes:
   ntfy-cache:
+
+
