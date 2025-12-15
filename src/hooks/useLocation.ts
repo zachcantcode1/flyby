@@ -5,34 +5,53 @@ export interface Location {
   longitude: number;
 }
 
+// Fallback location from environment variables
+const HOME_LAT = import.meta.env.VITE_HOME_LAT ? parseFloat(import.meta.env.VITE_HOME_LAT) : null;
+const HOME_LON = import.meta.env.VITE_HOME_LON ? parseFloat(import.meta.env.VITE_HOME_LON) : null;
+
 export function useLocation() {
-  const [location, setLocation] = useState<Location | null>(null);
+  // Start with fallback location if available
+  const fallbackLocation = HOME_LAT && HOME_LON
+    ? { latitude: HOME_LAT, longitude: HOME_LON }
+    : null;
+
+  const [location, setLocation] = useState<Location | null>(fallbackLocation);
   const [error, setError] = useState<string | null>(null);
+  const [usingFallback, setUsingFallback] = useState(!!fallbackLocation);
 
   useEffect(() => {
+    // Check if geolocation is available and we're in a secure context
     if (!navigator.geolocation) {
-      setError('Geolocation is not supported by your browser');
+      if (!fallbackLocation) {
+        setError('Geolocation is not supported. Set VITE_HOME_LAT and VITE_HOME_LON in your .env file.');
+      }
       return;
     }
 
-    // watchPosition calls success callback immediately with current position
+    // Try to get actual location
     const watcher = navigator.geolocation.watchPosition(
       (position) => {
         setLocation({
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         });
+        setUsingFallback(false);
         setError(null);
       },
       (err) => {
-        // Don't show error if it's just a permission denial on load (common)
-        if (err.code !== err.PERMISSION_DENIED) {
-           setError(err.message);
+        // If we have fallback, use it silently
+        if (fallbackLocation) {
+          console.log('Geolocation unavailable, using configured home location');
+          setUsingFallback(true);
+        } else if (err.code !== err.PERMISSION_DENIED) {
+          setError(err.message);
+        } else {
+          setError('Location access denied. Set VITE_HOME_LAT and VITE_HOME_LON in your .env file.');
         }
       },
       {
-        enableHighAccuracy: false, // Low power is fine for finding general area
-        timeout: 15000,
+        enableHighAccuracy: false,
+        timeout: 10000,  // Reduced timeout since we have fallback
         maximumAge: 10000
       }
     );
@@ -40,5 +59,6 @@ export function useLocation() {
     return () => navigator.geolocation.clearWatch(watcher);
   }, []);
 
-  return { location, error };
+  return { location, error, usingFallback };
 }
+
