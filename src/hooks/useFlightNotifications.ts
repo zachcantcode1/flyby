@@ -91,9 +91,15 @@ export function useFlightNotifications(location: Location | null, flights: Fligh
 
         // Send ntfy notification
         if (isNtfyEnabled()) {
+          // Build FlightRadar24 URL for click action
+          const fr24Url = callsign !== 'Unknown'
+            ? `https://www.flightradar24.com/${callsign}`
+            : `https://www.flightradar24.com/${flight.icao24}`;
+
           await sendNtfyNotification(title, body, {
             priority: 3,
             tags: ['airplane', flight.origin_country?.toLowerCase().replace(/\s+/g, '_') || 'unknown'],
+            click: fr24Url,
           });
         }
 
