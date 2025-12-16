@@ -6,7 +6,7 @@ services:
         - VITE_OPENSKY_CLIENT_ID=${VITE_OPENSKY_CLIENT_ID}
         - VITE_OPENSKY_CLIENT_SECRET=${VITE_OPENSKY_CLIENT_SECRET}
         - VITE_FR24_API_KEY=${VITE_FR24_API_KEY}
-        - VITE_NTFY_URL=http://ntfy:80
+        - VITE_NTFY_URL=${VITE_NTFY_URL:-https://ntfy.sh}
         - VITE_NTFY_TOPIC=${VITE_NTFY_TOPIC:-flyby-alerts}
         - VITE_HOME_LAT=${VITE_HOME_LAT}
         - VITE_HOME_LON=${VITE_HOME_LON}
