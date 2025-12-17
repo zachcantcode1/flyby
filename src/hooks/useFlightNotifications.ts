@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { FlightState } from '@/services/opensky';
+import type { FlightState } from '@/services/airplaneslive';
 import type { Location } from './useLocation';
 import { sendNtfyNotification, isNtfyEnabled } from '@/services/ntfy';
 import { getAirlineName } from '@/data/airlines';
@@ -51,34 +51,42 @@ export function useFlightNotifications(location: Location | null, flights: Fligh
       // Skip if no position data
       if (flight.latitude === null || flight.longitude === null) return;
 
-      const distance = getDistanceFromLatLonInKm(
-        refLat,
-        refLon,
-        flight.latitude,
-        flight.longitude
-      );
+      // Use pre-calculated distance from Airplanes.live if available, otherwise compute
+      let distanceKm: number;
+      if (flight.distance_nm !== null) {
+        distanceKm = flight.distance_nm * 1.852; // Convert nautical miles to km
+      } else {
+        distanceKm = getDistanceFromLatLonInKm(
+          refLat,
+          refLon,
+          flight.latitude,
+          flight.longitude
+        );
+      }
 
-      if (distance < NOTIFICATION_RADIUS_KM) {
-        // Build notification content
+      if (distanceKm < NOTIFICATION_RADIUS_KM) {
+        // Build notification content - prefer Airplanes.live data
         const callsign = flight.callsign?.trim() || 'Unknown';
-        const airlineCode = callsign.match(/^[A-Z]{3}/)?.[0];
-        const airlineName = airlineCode ? getAirlineName(airlineCode) : null;
+        // Use operator from Airplanes.live, fallback to airline lookup
+        const airlineName = flight.operator || getAirlineName(callsign);
 
         const altitudeFt = flight.baro_altitude
-          ? Math.round(flight.baro_altitude * 3.28084).toLocaleString()
+          ? Math.round(flight.baro_altitude).toLocaleString()
           : 'N/A';
 
         const speedKnots = flight.velocity
-          ? Math.round(flight.velocity * 1.944).toLocaleString()
+          ? Math.round(flight.velocity).toLocaleString()
           : 'N/A';
 
         const title = `✈️ Flight Overhead!`;
         const body = [
           `${callsign}${airlineName ? ` (${airlineName})` : ''}`,
-          `Distance: ${distance.toFixed(1)} km`,
+          `Distance: ${distanceKm.toFixed(1)} km`,
           `Altitude: ${altitudeFt} ft`,
           `Speed: ${speedKnots} kts`,
-        ].join('\n');
+          flight.is_military ? '🟢 MILITARY' : '',
+          flight.is_interesting && !flight.is_military ? '🟠 SPECIAL' : '',
+        ].filter(Boolean).join('\n');
 
         // Send browser notification
         if ("Notification" in window && Notification.permission === "granted") {

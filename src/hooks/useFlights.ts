@@ -1,48 +1,38 @@
 import { useState, useEffect } from 'react';
-import { getFlights, type FlightState } from '@/services/opensky';
+import { getFlights, type FlightState } from '@/services/airplaneslive';
 import type { Location } from './useLocation';
+
+// Radius in nautical miles for flight search (~185km)
+const SEARCH_RADIUS_NM = 100;
+// Polling interval in milliseconds (2 seconds for smooth updates)
+const POLL_INTERVAL_MS = 2000;
 
 export function useFlights(location: Location | null) {
   const [flights, setFlights] = useState<FlightState[]>([]);
 
-  // Stabilize the location to avoid jitter resizing the bounding box constantly
+  // Stabilize the location to avoid excessive API calls
   // Round to ~1km (2 decimal places)
   const stabilizedLat = location ? Math.round(location.latitude * 100) / 100 : null;
   const stabilizedLon = location ? Math.round(location.longitude * 100) / 100 : null;
   const stabilizedLocation = stabilizedLat && stabilizedLon ? `${stabilizedLat},${stabilizedLon}` : null;
 
   useEffect(() => {
-    if (!stabilizedLocation || !location) return;
+    if (!stabilizedLocation) return;
 
-    const fetch = async () => {
-      // Define a bounding box approx 200km around the user
-      const delta = 2.0;
-
-      // Use the *actual* location for the center, but rely on the effect 
-      // only triggering when the rough area changes.
-      // Actually, to be consistent, we should use the stabilized location for the box too,
-      // or else we drift slightly within the same effect cycle. 
-      // Let's use the stabilized center for the query to be distinct.
-
-      // Re-parsing the string matches the stable dependency
+    const fetchFlights = async () => {
       const [lat, lon] = stabilizedLocation.split(',').map(Number);
+      console.log(`Fetching flights for: ${lat}, ${lon} (radius: ${SEARCH_RADIUS_NM}nm)`);
 
-      console.log(`Fetching flights for stable center: ${lat}, ${lon}`);
-
-      const data = await getFlights(
-        lat - delta,
-        lon - delta,
-        lat + delta,
-        lon + delta
-      );
+      const data = await getFlights(lat, lon, SEARCH_RADIUS_NM);
       setFlights(data);
     };
 
-    fetch();
-    const interval = setInterval(fetch, 6000); // Poll every 6 seconds
+    fetchFlights();
+    const interval = setInterval(fetchFlights, POLL_INTERVAL_MS);
 
     return () => clearInterval(interval);
-  }, [stabilizedLocation]); // Only re-run if we move significantly (>1km)
+  }, [stabilizedLocation]);
 
   return { flights };
 }
+

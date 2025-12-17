@@ -7,7 +7,7 @@ import { getAirportDepartures, type FR24Departure } from '@/services/flightradar
 
 const createAirportIcon = (iata: string, showLabel: boolean) => {
     const markup = renderToStaticMarkup(
-        <div className="flex flex-col items-center justify-center -translate-x-1/2 -translate-y-1/2 w-20 h-20 pointer-events-none">
+        <div className="flex flex-col items-center justify-center w-20 h-20 pointer-events-none">
             <div className="w-3 h-3 bg-zinc-900/50 border-2 border-zinc-400 rounded-full shadow-[0_0_10px_rgba(255,255,255,0.3)] hover:bg-white hover:scale-125 transition-all duration-300 pointer-events-auto cursor-pointer" />
             {showLabel && (
                 <span className="text-[10px] font-mono font-bold text-zinc-300 mt-1 drop-shadow-md bg-zinc-950/40 px-1 rounded backdrop-blur-[1px]">
@@ -21,7 +21,7 @@ const createAirportIcon = (iata: string, showLabel: boolean) => {
         html: markup,
         className: '!bg-transparent border-none',
         iconSize: [80, 80], // Large enough container to hold label without clipping
-        iconAnchor: [40, 40],
+        iconAnchor: [40, 40], // Center of the icon - Leaflet handles the offset
     });
 };
 

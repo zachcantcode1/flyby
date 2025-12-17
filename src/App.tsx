@@ -9,12 +9,13 @@ import Map from '@/components/Map'
 import { useAircraftImage } from '@/hooks/useAircraftImage'
 import { FlightSummaryCard } from '@/components/FlightSummaryCard'
 import { FlightSearch } from '@/components/FlightSearch'
-import type { FlightState, FlightTrack, FlightRoute } from '@/services/opensky'
-import { getFlightTrack, getFlightRoute } from '@/services/opensky'
+import type { FlightState } from '@/services/airplaneslive'
+import { getFlightTrack, type FlightTrack } from '@/services/opensky-tracks'
 import { getFR24FlightDetails, type FR24FlightDetails } from '@/services/flightradar'
 import { Plane, Navigation, Gauge, ArrowUp, Clock, Compass, Activity } from 'lucide-react'
 import { getAirlineName } from '@/data/airlines'
 import { getDistance } from '@/utils/geo'
+import { isHelicopter } from '@/utils/aircraft'
 
 function App() {
   const { location } = useLocation()
@@ -45,27 +46,32 @@ function App() {
       // Select the flight immediately by creating a pseudo FlightState
       const pseudoFlight: FlightState = {
         icao24: details.hex || 'searched_' + Date.now(),
-        // Prefer commercial flight number (e.g. AA4379) over ATC callsign (AAL4379) for display
         callsign: details.flight || details.callsign || details.registration || 'SEARCHED',
         origin_country: 'Unknown',
         time_position: details.timestamp ? new Date(details.timestamp).getTime() / 1000 : Date.now() / 1000,
         last_contact: details.timestamp ? new Date(details.timestamp).getTime() / 1000 : Date.now() / 1000,
         longitude: details.lon,
         latitude: details.lat,
-        // FR24 returns altitude in feet, OpenSky uses meters. Convert: feet * 0.3048 = meters
-        baro_altitude: details.altitude ? details.altitude * 0.3048 : null,
+        baro_altitude: details.altitude ?? null,
         on_ground: details.altitude === 0,
-        // FR24 returns gspeed in knots, OpenSky uses m/s. Convert: knots * 0.514444 = m/s
-        velocity: details.gspeed ? details.gspeed * 0.514444 : null,
-        true_track: details.track,
-        // vspeed is already in ft/min from FR24, OpenSky uses m/s. Convert: ft/min * 0.00508 = m/s
-        vertical_rate: details.vertical_speed ? details.vertical_speed * 0.00508 : null,
+        velocity: details.gspeed ?? null,
+        true_track: details.track ?? null,
+        vertical_rate: details.vertical_speed ?? null,
         sensors: null,
-        geo_altitude: details.altitude ? details.altitude * 0.3048 : null,
-        squawk: details.squawk,
+        geo_altitude: details.altitude ?? null,
+        squawk: details.squawk ?? null,
         spi: false,
         position_source: 0,
-        category: 0
+        category: 0,
+        registration: details.registration || null,
+        aircraftType: details.aircraft?.code || null,
+        description: details.aircraft?.model || null,
+        operator: null,
+        year: null,
+        distance_nm: null,
+        direction: null,
+        is_military: false,
+        is_interesting: false,
       };
 
       setSelectedFlight(pseudoFlight);
@@ -90,7 +96,16 @@ function App() {
         squawk: null,
         spi: false,
         position_source: 0,
-        category: 0
+        category: 0,
+        registration: details.registration || null,
+        aircraftType: details.aircraft?.code || null,
+        description: details.aircraft?.model || null,
+        operator: null,
+        year: null,
+        distance_nm: null,
+        direction: null,
+        is_military: false,
+        is_interesting: false,
       };
 
       setSelectedFlight(pseudoFlight);
@@ -117,13 +132,13 @@ function App() {
   const [isExpanded, setIsExpanded] = useState(false)
 
   const [flightTrack, setFlightTrack] = useState<FlightTrack | null>(null)
-  const [flightRoute, setFlightRoute] = useState<FlightRoute | null>(null)
   const [fr24Details, setFr24Details] = useState<FR24FlightDetails | null>(null)
 
   // Fetch image for the main sheet view
-  // Prioritize FR24 registration, then try callsign (common for GA), then null
-  const candidateRegistration = fr24Details?.registration || selectedFlight?.callsign?.trim() || null;
-  const { imageUrl } = useAircraftImage(fr24Details?.aircraft?.code || null, candidateRegistration)
+  // Prioritize Airplanes.live registration, then FR24, then callsign
+  const candidateRegistration = selectedFlight?.registration || fr24Details?.registration || selectedFlight?.callsign?.trim() || null;
+  const candidateIcaoCode = selectedFlight?.aircraftType || fr24Details?.aircraft?.code || null;
+  const { imageUrl } = useAircraftImage(candidateIcaoCode, candidateRegistration)
 
   useEffect(() => {
     if (selectedFlight) {
@@ -132,22 +147,19 @@ function App() {
 
       if (isSearched) {
         // If it's the searched flight, we already have details in searchedFlight or fr24Details
-        // Just clear tracks as we don't have historical OpenSky track for it
+        // Just clear tracks as we don't have historical track for searched flights
         setFlightTrack(null);
-        setFlightRoute(null);
         // Ensure fr24Details is set (if not already by handleFlightFound)
         if (searchedFlight) setFr24Details(searchedFlight);
       } else {
-        // Standard OpenSky Flight
+        // Standard Flight from map selection
         // Reset previous details
         setFlightTrack(null)
-        setFlightRoute(null)
         setFr24Details(null)
         // setIsExpanded(false) // Don't auto-minimize if switching? Actually, standard behavior:
         if (!isExpanded) setIsExpanded(false);
 
         getFlightTrack(selectedFlight.icao24).then(setFlightTrack)
-        getFlightRoute(selectedFlight.icao24).then(setFlightRoute)
         if (selectedFlight.callsign) {
           getFR24FlightDetails(selectedFlight.callsign.trim()).then(setFr24Details)
         } else {
@@ -156,7 +168,6 @@ function App() {
       }
     } else {
       setFlightTrack(null)
-      setFlightRoute(null)
       setFr24Details(null)
       setIsExpanded(false)
     }
@@ -164,16 +175,18 @@ function App() {
 
   useFlightNotifications(location, flights)
 
-  // Determine best aircraft name to display
-  const displayAircraft = fr24Details?.aircraft?.model ||
+  // Determine best aircraft name to display - prefer Airplanes.live description
+  const displayAircraft = selectedFlight?.description ||
+    fr24Details?.aircraft?.model ||
     (fr24Details?.aircraft?.code ? `${fr24Details.aircraft.code} (Type)` : null) ||
+    (selectedFlight?.aircraftType ? `${selectedFlight.aircraftType} (Type)` : null) ||
     (selectedFlight?.category === 7 ? 'Helicopter' : null);
 
   const airlineName = getAirlineName(selectedFlight?.callsign);
 
   // Calculate generic Route string for display reuse
-  const originCode = fr24Details?.origin?.code?.iata || fr24Details?.origin?.code?.icao || flightRoute?.estDepartureAirport;
-  const destCode = fr24Details?.destination?.code?.iata || fr24Details?.destination?.code?.icao || flightRoute?.estArrivalAirport;
+  const originCode = fr24Details?.origin?.code?.iata || fr24Details?.origin?.code?.icao;
+  const destCode = fr24Details?.destination?.code?.iata || fr24Details?.destination?.code?.icao;
   const displayOrigin = originCode || 'Unknown';
   const displayDest = destCode || 'Unknown';
 
@@ -252,9 +265,31 @@ function App() {
       >
         <SheetContent side="bottom" className="max-h-[85vh] h-auto overflow-y-auto bg-zinc-900 border-t-zinc-800 text-zinc-100 outline-none p-6">
           <SheetHeader>
-            <SheetTitle className="text-zinc-50 flex items-center gap-2 text-2xl">
-              <Plane className="h-6 w-6 text-blue-500" />
+            <SheetTitle className="text-zinc-50 flex items-center gap-2 text-2xl flex-wrap">
+              {/* Aircraft type icon - helicopter or plane */}
+              {(selectedFlight?.category === 7 || isHelicopter(candidateIcaoCode)) ? (
+                <svg viewBox="0 0 24 24" fill="currentColor" className="h-6 w-6 text-blue-500">
+                  <rect x="11" y="2" width="2" height="20" rx="1" />
+                  <rect x="2" y="11" width="20" height="2" rx="1" />
+                  <path d="M12 6 C 10 6 8 8 8 12 L 8 16 C 8 19 10 21 12 21 C 14 21 16 19 16 16 L 16 12 C 16 8 14 6 12 6 Z" />
+                  <rect x="11" y="21" width="2" height="3" />
+                  <rect x="9" y="23" width="6" height="1" />
+                </svg>
+              ) : (
+                <Plane className="h-6 w-6 text-blue-500" />
+              )}
               {selectedFlight?.callsign || 'Unknown Flight'}
+              {/* Military/Interesting Badge */}
+              {selectedFlight?.is_military && (
+                <span className="text-xs font-bold bg-lime-600 text-white px-2 py-1 rounded-full uppercase tracking-wide">
+                  Military
+                </span>
+              )}
+              {selectedFlight?.is_interesting && !selectedFlight?.is_military && (
+                <span className="text-xs font-bold bg-amber-500 text-white px-2 py-1 rounded-full uppercase tracking-wide">
+                  Special
+                </span>
+              )}
               {/* Flight Status Badge */}
               {fr24Details?.status === 'landed' && (
                 <span className="text-xs font-bold bg-emerald-600 text-white px-2 py-1 rounded-full uppercase tracking-wide">
@@ -276,7 +311,7 @@ function App() {
               {/* Operating airline info */}
               <span className="block text-emerald-400 font-semibold text-sm mb-1">
                 {fr24Details?.operatingAs
-                  ? `Operating as ${fr24Details.operatingAs}`
+                  ? `Operating as ${getAirlineName(fr24Details.operatingAs) || fr24Details.operatingAs}`
                   : airlineName}
               </span>
               <span>
@@ -335,6 +370,13 @@ function App() {
                   <Plane className="h-3 w-3" /> Aircraft
                 </div>
                 <span className="text-lg font-mono text-indigo-300 leading-tight">{displayAircraft}</span>
+                {/* Owner/Operator beneath aircraft type */}
+                {selectedFlight?.operator && (
+                  <div className="mt-1 text-xs text-zinc-400">
+                    <span className="text-zinc-500">Operated by </span>
+                    <span className="text-emerald-400 font-medium">{selectedFlight.operator}</span>
+                  </div>
+                )}
               </div>
             )}
 

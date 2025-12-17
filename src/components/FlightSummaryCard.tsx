@@ -1,8 +1,16 @@
-import type { FlightState } from '@/services/opensky';
+import type { FlightState } from '@/services/airplaneslive';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Maximize2, X } from 'lucide-react';
+import { Maximize2, X, Navigation } from 'lucide-react';
 import { useAircraftImage } from '@/hooks/useAircraftImage';
+
+// Convert degrees to compass direction
+const degreesToCompass = (degrees: number | null): string => {
+    if (degrees === null) return '';
+    const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    const index = Math.round(degrees / 45) % 8;
+    return directions[index];
+};
 
 interface FlightSummaryCardProps {
     flight: FlightState;
@@ -16,7 +24,17 @@ interface FlightSummaryCardProps {
 }
 
 export function FlightSummaryCard({ flight, origin, destination, aircraft, registration, icaoCode, onExpand, onClose }: FlightSummaryCardProps) {
-    const { imageUrl } = useAircraftImage(icaoCode || null, registration);
+    // Prefer Airplanes.live data, fall back to props (from FR24)
+    const displayRegistration = flight.registration || registration;
+    const displayAircraft = flight.description || aircraft;
+    const displayIcaoCode = flight.aircraftType || icaoCode;
+
+    const { imageUrl } = useAircraftImage(displayIcaoCode || null, displayRegistration);
+
+    // Format distance/direction
+    const distanceDisplay = flight.distance_nm !== null
+        ? `${Math.round(flight.distance_nm)}nm ${degreesToCompass(flight.direction)}`
+        : null;
 
     return (
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 w-full max-w-md px-4 z-[500]">
@@ -30,17 +48,34 @@ export function FlightSummaryCard({ flight, origin, destination, aircraft, regis
                 )}
 
                 <div className="flex-1 min-w-0 z-10">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <h3 className="font-bold text-lg leading-none truncate">
                             {flight.callsign || 'Unknown Flight'}
                         </h3>
+                        {flight.is_military && (
+                            <span className="text-[10px] font-bold bg-lime-600 text-white px-1.5 py-0.5 rounded uppercase tracking-wide">
+                                Military
+                            </span>
+                        )}
+                        {flight.is_interesting && !flight.is_military && (
+                            <span className="text-[10px] font-bold bg-amber-500 text-white px-1.5 py-0.5 rounded uppercase tracking-wide">
+                                Special
+                            </span>
+                        )}
                         <span className="text-xs font-mono text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded">
-                            {registration || flight.icao24}
+                            {displayRegistration || flight.icao24}
                         </span>
+                        {/* Distance/Direction Badge */}
+                        {distanceDisplay && (
+                            <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/50 border border-cyan-800/50 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                <Navigation className="h-2.5 w-2.5" />
+                                {distanceDisplay}
+                            </span>
+                        )}
                     </div>
-                    {aircraft && (
+                    {displayAircraft && (
                         <p className="text-xs text-indigo-400 font-semibold mb-0.5">
-                            {aircraft}
+                            {displayAircraft}
                         </p>
                     )}
                     <p className="text-sm text-zinc-400 truncate">
@@ -75,3 +110,4 @@ export function FlightSummaryCard({ flight, origin, destination, aircraft, regis
         </div>
     );
 }
+

@@ -1,7 +1,7 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, useMap, Polyline, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
-import type { FlightState } from '@/services/opensky';
+import type { FlightState } from '@/services/airplaneslive';
 import type { FR24FlightDetails } from '@/services/flightradar';
 import type { Location } from '@/hooks/useLocation';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -42,21 +42,47 @@ function MapUpdater({ center }: { center: Location | null }) {
   return null;
 }
 
-const createPlaneIcon = (track: number, size: number, category: number, isSearched: boolean = false) => {
+const createPlaneIcon = (
+  track: number,
+  size: number,
+  category: number,
+  isSearched: boolean = false,
+  isMilitary: boolean = false,
+  isInteresting: boolean = false
+) => {
   const isHeli = category === 7;
   // Plane icon points East (90deg), so we rotate -90 to align with 0deg North
   // Heli icon points North (0deg), so no offset needed
   const rotationOffset = isHeli ? 0 : -90;
+
+  // Determine glow color based on status (priority: searched > military > interesting > normal)
+  let glowFilter = 'drop-shadow(0 0 4px rgba(0,0,0,0.5))';
+  let iconColor = 'white';
+  let imgFilter: string | undefined;
+
+  if (isSearched) {
+    glowFilter = 'drop-shadow(0 0 8px #ef4444)'; // Red glow
+    iconColor = '#ef4444';
+    imgFilter = 'brightness(0) saturate(100%) invert(27%) sepia(51%) saturate(2878%) hue-rotate(346deg) brightness(104%) contrast(97%)';
+  } else if (isMilitary) {
+    glowFilter = 'drop-shadow(0 0 6px #84cc16) drop-shadow(0 0 12px #65a30d)'; // Lime/olive glow
+    iconColor = '#84cc16';
+    imgFilter = 'brightness(0) saturate(100%) invert(72%) sepia(62%) saturate(456%) hue-rotate(43deg) brightness(98%) contrast(88%)';
+  } else if (isInteresting) {
+    glowFilter = 'drop-shadow(0 0 6px #f59e0b) drop-shadow(0 0 12px #d97706)'; // Amber glow
+    iconColor = '#f59e0b';
+    imgFilter = 'brightness(0) saturate(100%) invert(67%) sepia(74%) saturate(508%) hue-rotate(1deg) brightness(103%) contrast(97%)';
+  }
 
   const markup = renderToStaticMarkup(
     <div style={{
       transform: `rotate(${track + rotationOffset}deg)`,
       width: `${size}px`,
       height: `${size}px`,
-      filter: isSearched ? 'drop-shadow(0 0 8px #ef4444)' : 'drop-shadow(0 0 4px rgba(0,0,0,0.5))' // Red glow for searched
+      filter: glowFilter
     }}>
       {isHeli ? (
-        <svg viewBox="0 0 24 24" fill={isSearched ? "#ef4444" : "white"} xmlns="http://www.w3.org/2000/svg" style={{ width: '100%', height: '100%', filter: 'drop-shadow(0 0 2px rgba(0,0,0,0.8))' }}>
+        <svg viewBox="0 0 24 24" fill={iconColor} xmlns="http://www.w3.org/2000/svg" style={{ width: '100%', height: '100%', filter: 'drop-shadow(0 0 2px rgba(0,0,0,0.8))' }}>
           {/* Main Rotor */}
           <rect x="11" y="2" width="2" height="20" rx="1" />
           <rect x="2" y="11" width="20" height="2" rx="1" />
@@ -70,7 +96,7 @@ const createPlaneIcon = (track: number, size: number, category: number, isSearch
         <img
           src="/plane-icon.png"
           alt="plane"
-          style={{ width: '100%', height: '100%', objectFit: 'contain', filter: isSearched ? 'brightness(0) saturate(100%) invert(27%) sepia(51%) saturate(2878%) hue-rotate(346deg) brightness(104%) contrast(97%)' : undefined }}
+          style={{ width: '100%', height: '100%', objectFit: 'contain', filter: imgFilter }}
         />
       )}
     </div>
@@ -129,20 +155,29 @@ function PlaneMarkers({ flights, selectedFlightIcao24, selectedAircraftCode, onF
           last_contact: searchedFlight.timestamp ? new Date(searchedFlight.timestamp).getTime() / 1000 : Date.now() / 1000,
           longitude: searchedFlight.lon,
           latitude: searchedFlight.lat,
-          // FR24 returns altitude in feet, OpenSky uses meters
-          baro_altitude: searchedFlight.altitude ? searchedFlight.altitude * 0.3048 : null,
+          // FR24 returns altitude in feet, we keep as feet for Airplanes.live compatibility
+          baro_altitude: searchedFlight.altitude ?? null,
           on_ground: searchedFlight.altitude === 0,
-          // FR24 returns gspeed in knots, OpenSky uses m/s
-          velocity: searchedFlight.gspeed ? searchedFlight.gspeed * 0.514444 : null,
-          true_track: searchedFlight.track,
-          // vspeed is ft/min from FR24, OpenSky uses m/s
-          vertical_rate: searchedFlight.vertical_speed ? searchedFlight.vertical_speed * 0.00508 : null,
+          // FR24 returns gspeed in knots, keep as knots for Airplanes.live compatibility
+          velocity: searchedFlight.gspeed ?? null,
+          true_track: searchedFlight.track ?? null,
+          vertical_rate: searchedFlight.vertical_speed ?? null,
           sensors: null,
-          geo_altitude: searchedFlight.altitude ? searchedFlight.altitude * 0.3048 : null,
-          squawk: searchedFlight.squawk,
+          geo_altitude: searchedFlight.altitude ?? null,
+          squawk: searchedFlight.squawk ?? null,
           spi: false,
           position_source: 0,
-          category: 0 // Default plane
+          category: 0,
+          // New Airplanes.live fields
+          registration: searchedFlight.registration || null,
+          aircraftType: searchedFlight.aircraft?.code || null,
+          description: searchedFlight.aircraft?.model || null,
+          operator: null,
+          year: null,
+          distance_nm: null,
+          direction: null,
+          is_military: false,
+          is_interesting: false,
         };
         list.push(pseudoFlight);
       }
@@ -157,7 +192,7 @@ function PlaneMarkers({ flights, selectedFlightIcao24, selectedAircraftCode, onF
   return (
     <>
       {displayFlights.map((flight) => {
-        // Determine category: use OpenSky data first, but override if this is the selected flight and we know it's a heli
+        // Determine category: use API data first, but override if this is the selected flight and we know it's a heli
         let category = flight.category;
         if (flight.icao24 === selectedFlightIcao24 && isHelicopter(selectedAircraftCode)) {
           category = 7; // Force helicopter category
@@ -170,7 +205,14 @@ function PlaneMarkers({ flights, selectedFlightIcao24, selectedAircraftCode, onF
           <Marker
             key={flight.icao24}
             position={[flight.latitude!, flight.longitude!]}
-            icon={createPlaneIcon(flight.true_track ?? 0, size, category, !!isSearched)}
+            icon={createPlaneIcon(
+              flight.true_track ?? 0,
+              size,
+              category,
+              !!isSearched,
+              flight.is_military,
+              flight.is_interesting
+            )}
             eventHandlers={{
               click: () => onFlightSelect(flight),
             }}
@@ -197,12 +239,21 @@ const createUserLocationIcon = () => {
   });
 };
 
-// Component to handle auto-zooming to flight track
+// Component to handle auto-zooming to flight track and restoring view
 function FlightFocusController({ track, isExpanded }: { track: [number, number][] | null, isExpanded: boolean }) {
   const map = useMap();
+  const savedViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
 
   useEffect(() => {
     if (isExpanded && track && track.length > 0) {
+      // Save current view before zooming out
+      if (!savedViewRef.current) {
+        savedViewRef.current = {
+          center: map.getCenter(),
+          zoom: map.getZoom()
+        };
+      }
+
       const bounds = L.latLngBounds(track);
       map.fitBounds(bounds, {
         paddingTopLeft: [40, 40],
@@ -210,6 +261,13 @@ function FlightFocusController({ track, isExpanded }: { track: [number, number][
         animate: true,
         duration: 1.5
       });
+    } else if (!isExpanded && savedViewRef.current) {
+      // Restore saved view when closing
+      map.setView(savedViewRef.current.center, savedViewRef.current.zoom, {
+        animate: true,
+        duration: 0.5
+      });
+      savedViewRef.current = null;
     }
   }, [isExpanded, track, map]);
 
